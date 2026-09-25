@@ -147,3 +147,8 @@ blocked at the database level, not just by the tool's own claims.
 fix a mistake or clarify what I said without deleting the whole comment
 and losing the thread position/replies context.
 *Related requirements: REQ-049*
+
+**US-030** — As a user, I want to browse articles sorted by how many favorites
+they've received, so that I can discover the most well-received content on
+the platform.
+*Related requirements: REQ-050*

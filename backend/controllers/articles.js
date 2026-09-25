@@ -1,3 +1,4 @@
+const Sequelize = require("sequelize");
 const {
   AlreadyTakenError,
   FieldRequiredError,
@@ -18,12 +19,26 @@ const includeOptions = [
   { model: User, as: "author", attributes: { exclude: ["email"] } },
 ];
 
+// Favorite count isn't a real column on Article, so sorting by it (REQ-050)
+// needs a computed subquery rather than a plain ORDER BY column.
+const favoritesCountLiteral = () =>
+  Sequelize.literal(
+    '(SELECT COUNT(*) FROM "Favorites" WHERE "Favorites"."articleId" = "Article"."id")',
+  );
+
 //? All Articles - by Author/by Tag/Favorited by user
 const allArticles = async (req, res, next) => {
   try {
     const { loggedUser } = req;
 
-    const { author, tag, favorited, limit = 3, offset = 0 } = req.query;
+    const {
+      author,
+      tag,
+      favorited,
+      limit = 3,
+      offset = 0,
+      sort,
+    } = req.query;
     const searchOptions = {
       include: [
         {
@@ -43,6 +58,19 @@ const allArticles = async (req, res, next) => {
       offset: offset * limit,
       order: [["createdAt", "DESC"]],
     };
+
+    // REQ-050: sort=favorites orders by favorite count, newest first as a
+    // tie-break. Does not apply to the `favorited` branch below, which
+    // queries through User.getFavorites() rather than Article directly.
+    if (sort === "favorites" && !favorited) {
+      searchOptions.attributes = {
+        include: [[favoritesCountLiteral(), "favoritesCount"]],
+      };
+      searchOptions.order = [
+        [favoritesCountLiteral(), "DESC"],
+        ["createdAt", "DESC"],
+      ];
+    }
 
     let articles = { rows: [], count: 0 };
     if (favorited) {
