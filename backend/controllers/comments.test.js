@@ -10,7 +10,7 @@ const Article = { findOne: vi.fn() };
 const Comment = { create: vi.fn(), findByPk: vi.fn() };
 mockRequire(require.resolve("../models"), { Article, Comment, User: {} });
 
-const { allComments, createComment, deleteComment } = require("./comments");
+const { allComments, createComment, editComment, deleteComment } = require("./comments");
 
 function makeFollowableUser(overrides = {}) {
   return makeInstance(
@@ -109,6 +109,110 @@ describe("createComment", () => {
 
     expect(Comment.create).toHaveBeenCalledWith(expect.objectContaining({ body: "   " }));
     expect(res.status).toHaveBeenCalledWith(201);
+  });
+});
+
+describe("editComment", () => {
+  // AC-084: unauthenticated edit attempt is rejected.
+  test("no loggedUser -> UnauthorizedError", async () => {
+    const next = vi.fn();
+
+    await editComment({ loggedUser: undefined, params: {}, body: { comment: {} } }, makeRes(), next);
+
+    expect(next.mock.calls[0][0]).toBeInstanceOf(UnauthorizedError);
+    expect(Comment.findByPk).not.toHaveBeenCalled();
+  });
+
+  // AC-080: an empty body is rejected.
+  test("empty body -> FieldRequiredError, comment not modified", async () => {
+    const next = vi.fn();
+
+    await editComment(
+      { loggedUser: makeFollowableUser(), body: { comment: { body: "" } }, params: { commentId: 1 } },
+      makeRes(),
+      next,
+    );
+
+    expect(next.mock.calls[0][0]).toBeInstanceOf(FieldRequiredError);
+    expect(Comment.findByPk).not.toHaveBeenCalled();
+  });
+
+  // AC-081: editing a nonexistent comment id is rejected.
+  test("nonexistent comment id -> NotFoundError", async () => {
+    Comment.findByPk.mockResolvedValue(null);
+    const next = vi.fn();
+
+    await editComment(
+      { loggedUser: makeFollowableUser(), body: { comment: { body: "edited" } }, params: { commentId: 999 } },
+      makeRes(),
+      next,
+    );
+
+    expect(next.mock.calls[0][0]).toBeInstanceOf(NotFoundError);
+  });
+
+  // AC-083: a non-author cannot edit someone else's comment.
+  test("non-author attempts edit -> ForbiddenError, body unchanged", async () => {
+    const comment = makeInstance({ id: 1, userId: 9, body: "original" }, { save: vi.fn().mockResolvedValue() });
+    Comment.findByPk.mockResolvedValue(comment);
+    const next = vi.fn();
+
+    await editComment(
+      {
+        loggedUser: makeFollowableUser({ id: 2 }),
+        body: { comment: { body: "hijacked" } },
+        params: { commentId: 1 },
+      },
+      makeRes(),
+      next,
+    );
+
+    expect(next.mock.calls[0][0]).toBeInstanceOf(ForbiddenError);
+    expect(comment.body).toBe("original");
+    expect(comment.save).not.toHaveBeenCalled();
+  });
+
+  // AC-082: the comment's author can edit it, and the update persists.
+  test("comment author edits own comment", async () => {
+    const comment = makeInstance({ id: 1, userId: 9, body: "original" }, { save: vi.fn().mockResolvedValue() });
+    Comment.findByPk.mockResolvedValue(comment);
+    const res = makeRes();
+
+    await editComment(
+      {
+        loggedUser: makeFollowableUser({ id: 9 }),
+        body: { comment: { body: "edited text" } },
+        params: { commentId: 1 },
+      },
+      res,
+      vi.fn(),
+    );
+
+    expect(comment.body).toBe("edited text");
+    expect(comment.save).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({ comment });
+  });
+
+  // AC-085: the server only checks that `body` is truthy - a whitespace-only
+  // body is accepted, mirroring createComment's existing behavior (AC-043).
+  test("whitespace-only body -> accepted and saved", async () => {
+    const comment = makeInstance({ id: 1, userId: 9, body: "original" }, { save: vi.fn().mockResolvedValue() });
+    Comment.findByPk.mockResolvedValue(comment);
+    const res = makeRes();
+
+    await editComment(
+      {
+        loggedUser: makeFollowableUser({ id: 9 }),
+        body: { comment: { body: "   " } },
+        params: { commentId: 1 },
+      },
+      res,
+      vi.fn(),
+    );
+
+    expect(comment.body).toBe("   ");
+    expect(comment.save).toHaveBeenCalled();
+    expect(res.json).toHaveBeenCalledWith({ comment });
   });
 });
 

@@ -61,6 +61,32 @@ const createComment = async (req, res, next) => {
   }
 };
 
+//* Edit Comment for Article
+const editComment = async (req, res, next) => {
+  try {
+    const { loggedUser } = req;
+    if (!loggedUser) throw new UnauthorizedError();
+
+    const { body } = req.body.comment;
+    if (!body) throw new FieldRequiredError("Comment body");
+
+    const { commentId } = req.params;
+    const comment = await Comment.findByPk(commentId);
+    if (!comment) throw new NotFoundError("Comment");
+
+    if (loggedUser.id !== comment.userId) {
+      throw new ForbiddenError("comment");
+    }
+
+    comment.body = body;
+    await comment.save();
+
+    res.json({ comment });
+  } catch (error) {
+    next(error);
+  }
+};
+
 //* Delete Comment for Article
 const deleteComment = async (req, res, next) => {
   try {
@@ -84,4 +110,4 @@ const deleteComment = async (req, res, next) => {
   }
 };
 
-module.exports = { allComments, createComment, deleteComment };
+module.exports = { allComments, createComment, editComment, deleteComment };

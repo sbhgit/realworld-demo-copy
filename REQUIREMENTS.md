@@ -405,3 +405,17 @@ tools are not added to any auto-approval allowlist in
 `.claude/settings.json`, so the first use of the server in a session
 requires the normal Claude Code permission prompt rather than running
 unattended.
+
+### REQ-049 — Only the comment's author may edit it
+Editing a comment is only permitted for the account that authored it; any
+other authenticated account attempting to edit the comment is rejected
+with an authorization error, mirroring the existing deletion rule
+(REQ-023). Editing requires a non-empty `body` and requires the target
+comment (identified by ID) to exist; otherwise the request is rejected
+(field-required or not-found, respectively). As with comment creation
+(REQ-022), the submitted body is only checked for truthiness on the
+server — a body consisting solely of whitespace is not rejected
+server-side. An unauthenticated request to edit a comment is rejected
+with an authentication-required error. A successful edit persists the
+updated body, so it is reflected on subsequent retrieval of the article's
+comments, not only in the submitting client's own session.

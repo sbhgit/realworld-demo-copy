@@ -142,3 +142,8 @@ read-only MCP access to the local development database, so that I can
 inspect schema and data directly while any accidental write attempt is
 blocked at the database level, not just by the tool's own claims.
 *Related requirements: REQ-047, REQ-048*
+
+**US-029** — As a comment author, I want to edit my own comment, so that I can
+fix a mistake or clarify what I said without deleting the whole comment
+and losing the thread position/replies context.
+*Related requirements: REQ-049*
