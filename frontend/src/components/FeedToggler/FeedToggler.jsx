@@ -13,6 +13,8 @@ function FeedToggler() {
 
         <FeedNavLink name="global" text="Global Feed" />
 
+        <FeedNavLink name="top" text="Top Articles" />
+
         {tabName === "tag" && <FeedNavLink icon name="tag" text={tagName} />}
       </ul>
     </div>

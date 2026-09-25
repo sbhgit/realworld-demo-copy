@@ -430,6 +430,29 @@ changed.
   `body` is truthy, not that it contains non-whitespace content (mirroring
   AC-043 for comment creation).
 
+### US-030 — Browse articles sorted by favorite count
+*(REQ-050)*
+
+- **AC-086** — Given at least two articles with different favorite counts,
+  when the article list is requested with `sort=favorites`, then articles
+  are returned ordered by favorite count descending.
+- **AC-087** — Given two or more articles with equal favorite counts, when
+  the article list is requested with `sort=favorites`, then those articles
+  are ordered newest first relative to each other.
+- **AC-088** — Given `sort=favorites`, when the article list is requested
+  with `limit`/`offset`, then pagination and the true `articlesCount`
+  total behave the same as under the default order.
+- **AC-089** — Given no `sort` parameter, or an unrecognized value, when
+  the article list is requested, then the existing default order (newest
+  first) is unchanged.
+- **AC-090** — Given no `Authorization` header, when the article list is
+  requested with `sort=favorites`, then the request succeeds without
+  requiring authentication.
+- **AC-091** — Given both `sort=favorites` and `favorited=<username>` are
+  supplied, when the article list is requested, then `sort` has no
+  effect and articles favorited by that user are returned newest first,
+  the same as without `sort`.
+
 ---
 
 ## Traceability Matrix
@@ -485,3 +508,4 @@ changed.
 | REQ-047 | US-028 | AC-076, AC-077 |
 | REQ-048 | US-028 | AC-078, AC-079 |
 | REQ-049 | US-029 | AC-080–AC-085 |
+| REQ-050 | US-030 | AC-086–AC-091 |

@@ -39,6 +39,7 @@ function makeArticle({ author, tags = [], hasUser = false, favoritesCount = 0, .
       tagList: tags,
       createdAt: new Date("2020-01-01"),
       author,
+      favoritesCount,
       ...data,
     },
     {
@@ -58,9 +59,24 @@ function makeArticle({ author, tags = [], hasUser = false, favoritesCount = 0, .
 // the query shapes allArticles/articlesFeed actually construct, so list
 // behavior can be asserted on the returned response body rather than on
 // what arguments were passed to a mock.
+//
+// `order`'s first sort key is a plain column-name string ("createdAt") for
+// the default order, or a Sequelize.literal object (REQ-050's favorites-
+// count subquery) when `sort=favorites` was requested - that's what this
+// fake keys off of to decide which order to apply, since it has no real SQL
+// engine to evaluate the literal itself.
 function fakeArticleList(seedRows) {
-  return ({ include = [], limit, offset, where } = {}) => {
-    let rows = [...seedRows].sort((a, b) => b.dataValues.createdAt - a.dataValues.createdAt);
+  return ({ include = [], limit, offset, where, order } = {}) => {
+    let rows = [...seedRows];
+
+    const sortingByFavorites = typeof order?.[0]?.[0] !== "string";
+    rows.sort((a, b) => {
+      if (sortingByFavorites) {
+        const diff = (b.dataValues.favoritesCount ?? 0) - (a.dataValues.favoritesCount ?? 0);
+        if (diff !== 0) return diff;
+      }
+      return b.dataValues.createdAt - a.dataValues.createdAt;
+    });
 
     const tagFilter = include.find((i) => i.as === "tagList")?.where?.name;
     const authorFilter = include.find((i) => i.as === "author")?.where?.username;
@@ -434,6 +450,134 @@ describe("allArticles", () => {
     const error = next.mock.calls[0][0];
     expect(error).not.toBeInstanceOf(NotFoundError);
     expect(error).not.toBeInstanceOf(FieldRequiredError);
+  });
+
+  // AC-089: an unrecognized `sort` value leaves the default (newest-first)
+  // order unchanged rather than erroring or being treated as "favorites".
+  test("unrecognized sort value -> default newest-first order, no error", async () => {
+    const seed = makeSeedArticles();
+    Article.findAndCountAll.mockImplementation(fakeArticleList(seed));
+    const res = makeRes();
+    const next = vi.fn();
+
+    await allArticles({ loggedUser: undefined, query: { sort: "bogus" } }, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    const { articles } = res.json.mock.calls[0][0];
+    expect(articles.map((a) => a.slug)).toEqual(["jane-2", "bob-1", "jane-1"]);
+  });
+
+  describe("sort=favorites (REQ-050)", () => {
+    function makeSortableSeed() {
+      return [
+        makeArticle({
+          id: 1,
+          slug: "low-fav-newer",
+          author: makeFollowableUser({ id: 1, username: "jane" }),
+          favoritesCount: 1,
+          createdAt: new Date("2020-01-05"),
+        }),
+        makeArticle({
+          id: 2,
+          slug: "high-fav-older",
+          author: makeFollowableUser({ id: 1, username: "jane" }),
+          favoritesCount: 5,
+          createdAt: new Date("2020-01-01"),
+        }),
+        makeArticle({
+          id: 3,
+          slug: "mid-fav-newest",
+          author: makeFollowableUser({ id: 2, username: "bob" }),
+          favoritesCount: 3,
+          createdAt: new Date("2020-01-10"),
+        }),
+      ];
+    }
+
+    // AC-086: ordered by favorite count descending, even when that puts an
+    // older article ahead of a newer one with fewer favorites.
+    test("orders by favorite count descending", async () => {
+      const seed = makeSortableSeed();
+      Article.findAndCountAll.mockImplementation(fakeArticleList(seed));
+      const res = makeRes();
+
+      await allArticles({ loggedUser: undefined, query: { sort: "favorites" } }, res, vi.fn());
+
+      const { articles } = res.json.mock.calls[0][0];
+      expect(articles.map((a) => a.slug)).toEqual(["high-fav-older", "mid-fav-newest", "low-fav-newer"]);
+    });
+
+    // AC-087: articles tied on favorite count are ordered newest first.
+    test("ties on favorite count break newest-first", async () => {
+      const seed = [
+        makeArticle({
+          id: 1,
+          slug: "tied-older",
+          author: makeFollowableUser(),
+          favoritesCount: 2,
+          createdAt: new Date("2020-01-01"),
+        }),
+        makeArticle({
+          id: 2,
+          slug: "tied-newer",
+          author: makeFollowableUser(),
+          favoritesCount: 2,
+          createdAt: new Date("2020-01-05"),
+        }),
+      ];
+      Article.findAndCountAll.mockImplementation(fakeArticleList(seed));
+      const res = makeRes();
+
+      await allArticles({ loggedUser: undefined, query: { sort: "favorites" } }, res, vi.fn());
+
+      const { articles } = res.json.mock.calls[0][0];
+      expect(articles.map((a) => a.slug)).toEqual(["tied-newer", "tied-older"]);
+    });
+
+    // AC-088: pagination (limit/offset) and the true total count behave the
+    // same under sort=favorites as under the default order.
+    test("respects limit/offset pagination and reports the true total", async () => {
+      const seed = makeSortableSeed();
+      Article.findAndCountAll.mockImplementation(fakeArticleList(seed));
+      const res = makeRes();
+
+      await allArticles({ loggedUser: undefined, query: { sort: "favorites", limit: "2", offset: "0" } }, res, vi.fn());
+
+      const { articles, articlesCount } = res.json.mock.calls[0][0];
+      expect(articlesCount).toBe(3);
+      expect(articles.map((a) => a.slug)).toEqual(["high-fav-older", "mid-fav-newest"]);
+    });
+
+    // AC-090: sort=favorites requires no authentication.
+    test("succeeds with no loggedUser", async () => {
+      const seed = makeSortableSeed();
+      Article.findAndCountAll.mockImplementation(fakeArticleList(seed));
+      const res = makeRes();
+      const next = vi.fn();
+
+      await allArticles({ loggedUser: undefined, query: { sort: "favorites" } }, res, next);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.json).toHaveBeenCalled();
+    });
+
+    // AC-091 (REQ-050 boundary): combined with `favorited=<username>`, sort
+    // has no effect - that branch keeps its existing newest-first order.
+    test("combined with favorited=<username>, sort has no effect", async () => {
+      const favorited = makeArticle({ author: makeFollowableUser(), slug: "favorited-1" });
+      const fan = makeInstance(
+        { id: 5, username: "fan" },
+        { getFavorites: vi.fn().mockResolvedValue([favorited]), countFavorites: vi.fn().mockResolvedValue(1) },
+      );
+      User.findOne.mockResolvedValue(fan);
+      const res = makeRes();
+
+      await allArticles({ loggedUser: undefined, query: { favorited: "fan", sort: "favorites" } }, res, vi.fn());
+
+      const passedOptions = fan.getFavorites.mock.calls[0][0];
+      expect(passedOptions.order).toEqual([["createdAt", "DESC"]]);
+      expect(passedOptions.attributes).toBeUndefined();
+    });
   });
 });
 

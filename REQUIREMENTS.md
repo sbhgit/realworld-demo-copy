@@ -419,3 +419,20 @@ server-side. An unauthenticated request to edit a comment is rejected
 with an authentication-required error. A successful edit persists the
 updated body, so it is reflected on subsequent retrieval of the article's
 comments, not only in the submitting client's own session.
+
+### REQ-050 — Article listing can be sorted by favorite count
+The article listing endpoint (`GET /api/articles`, `allArticles`,
+REQ-013) accepts a `sort` parameter. When `sort=favorites` is given,
+results are ordered by favorite count descending, with articles tied on
+favorite count ordered newest first as a tie-break. This mode does not
+require authentication and is not restricted to followed authors, unlike
+the personalized feed (REQ-018). Pagination (`limit`/`offset`, REQ-031)
+and the true total (`articlesCount`) behave the same under this sort mode
+as under the default order. Any other value of `sort`, or the parameter's
+absence, leaves the existing default order (newest first, REQ-013)
+unchanged.
+
+**Boundary:** when the `favorited=<username>` filter (REQ-013) is also
+present, `sort` has no effect — articles favorited by that user continue
+to be returned newest first, regardless of any `sort` value supplied
+alongside `favorited`.
